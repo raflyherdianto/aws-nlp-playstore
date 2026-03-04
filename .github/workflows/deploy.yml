@@ -1,0 +1,107 @@
+name: CI/CD — Test & Deploy to AWS EC2
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  # ── 1. Lint & Test ──────────────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  # ── 2. Deploy to EC2 (only on push to main) ────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          timeout: 300s
+          command_timeout: 10m
+          script: |
+            set -e
+
+            PROJECT_DIR="$HOME/aws-nlp-playstore"
+
+            # Clone if first deploy, otherwise pull
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "📦 First deploy — cloning repository..."
+              git clone https://github.com/raflyherdianto/aws-nlp-playstore.git "$PROJECT_DIR"
+            else
+              echo "🔄 Pulling latest changes..."
+              cd "$PROJECT_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            cd "$PROJECT_DIR"
+
+            # Create .env if it doesn't exist
+            if [ ! -f .env ]; then
+              echo "⚙️ Creating .env file..."
+              cat > .env <<EOF
+            FLASK_ENV=production
+            PYTHONUNBUFFERED=1
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            EOF
+            else
+              # Update SECRET_KEY from GitHub Secrets
+              sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${{ secrets.SECRET_KEY }}|" .env
+            fi
+
+            # Build and deploy
+            echo "🐳 Building Docker image..."
+            docker compose build --no-cache
+
+            echo "🚀 Starting container..."
+            docker compose up -d
+
+            # Wait for container to be healthy
+            echo "⏳ Waiting for health check..."
+            for i in $(seq 1 30); do
+              if docker inspect --format='{{.State.Health.Status}}' nlp_playstore 2>/dev/null | grep -q "healthy"; then
+                echo "✅ Container is healthy!"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "⚠️ Health check timeout — checking logs..."
+                docker logs nlp_playstore --tail 20
+                exit 1
+              fi
+              sleep 5
+            done
+
+            # Cleanup old images to save disk space
+            echo "🧹 Cleaning up old images..."
+            docker image prune -f
+
+            echo "✅ Deployment complete!"

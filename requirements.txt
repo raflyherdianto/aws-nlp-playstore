@@ -1,0 +1,15 @@
+flask==3.0.3
+gunicorn==23.0.0
+flask-wtf==1.2.2
+flask-limiter==3.8.0
+google-play-scraper==1.2.7
+pandas==2.2.2
+scikit-learn==1.5.1
+matplotlib==3.9.2
+wordcloud==1.9.3
+Sastrawi==1.0.1
+nltk==3.9.1
+APScheduler==3.10.4
+joblib==1.4.2
+python-dotenv==1.0.1
+pytest==8.3.2

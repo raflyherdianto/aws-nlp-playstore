@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+uploads/
+app/static/charts/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+node_modules/
+.DS_Store
+Thumbs.db
+SETUP.md
+SPEC.md

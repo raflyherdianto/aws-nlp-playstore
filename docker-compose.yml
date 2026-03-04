@@ -1,0 +1,38 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nlp_playstore
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads # Persistensi sementara untuk CSV & Model
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - NLTK_DATA=/root/nltk_data
+      - SECRET_KEY=${SECRET_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 800M    # Sisakan ~200MB untuk OS dan Cloudflare Tunnel
+          cpus: '0.8'      # Sisakan 20% CPU agar OS tetap responsif
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"   # Mencegah log memenuhi disk 30GB AWS
+        max-file: "3"
+
+  # Cloudflare Tunnel sebagai sidecar atau bisa diinstall terpisah di host
+  # Saya sarankan install di host agar lebih stabil, 
+  # tapi jika ingin di docker, gunakan image: cloudflare/cloudflared

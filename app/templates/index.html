@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+{% block title %}Home – NLP Sentiment Analyzer{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-8">
+
+    <!-- ── Scrape Form ────────────────────────────────────────────────── -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">Analisis Sentimen Play Store</h1>
+        <p class="text-gray-500 mb-8">
+            Scrape &amp; analisis review aplikasi Indonesia dari Google Play Store
+            menggunakan NLP dan Machine Learning.
+        </p>
+
+        <form action="{{ url_for('main.scrape') }}" method="POST" id="scrapeForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-6">
+                <label for="app_id" class="block text-sm font-semibold text-gray-700 mb-2">
+                    Play Store App ID
+                </label>
+                <input type="text" name="app_id" id="app_id" required
+                    class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl
+                           focus:border-blue-500 focus:ring-0 focus:outline-none transition"
+                    placeholder="com.example.app">
+                <p class="text-xs text-gray-400 mt-1">
+                    Contoh: <code class="bg-gray-100 px-1 rounded">com.gojek.app</code>,
+                    <code class="bg-gray-100 px-1 rounded">com.tokopedia.tkpd</code>
+                </p>
+            </div>
+
+            <div class="mb-6">
+                <label for="max_reviews" class="block text-sm font-semibold text-gray-700 mb-2">
+                    Jumlah Review (maks 15.000)
+                </label>
+                <input type="number" name="max_reviews" id="max_reviews"
+                    min="100" max="15000" value="1000"
+                    class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl
+                           focus:border-blue-500 focus:ring-0 focus:outline-none transition">
+            </div>
+
+            <button type="submit" id="submitBtn"
+                class="w-full bg-blue-600 text-white py-3 px-6 rounded-xl font-semibold
+                       hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Mulai Scraping &amp; Analisis
+            </button>
+        </form>
+
+        <!-- Progress bar (hidden by default) -->
+        <div id="progressContainer" class="hidden mt-6">
+            <div class="flex justify-between items-center mb-2">
+                <span id="progressMessage" class="text-sm font-medium text-blue-600">Memulai...</span>
+                <span id="progressPercent" class="text-sm font-semibold text-blue-600">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full" style="height: 12px">
+                <div id="progressBar" class="bg-blue-600 rounded-full"
+                     style="height: 12px; width: 0%; transition: width 0.3s ease"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Feature Cards ──────────────────────────────────────────────── -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h2 class="text-lg font-bold text-gray-800 mb-4">Fitur</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="p-4 bg-blue-50 rounded-xl">
+                <h3 class="font-semibold text-blue-700">Analisis Sentimen</h3>
+                <p class="text-sm text-gray-600 mt-1">Distribusi sentimen Positif dan Negatif (InSet Lexicon)</p>
+            </div>
+            <div class="p-4 bg-green-50 rounded-xl">
+                <h3 class="font-semibold text-green-700">Word Cloud</h3>
+                <p class="text-sm text-gray-600 mt-1">Visualisasi kata per kategori sentimen</p>
+            </div>
+            <div class="p-4 bg-purple-50 rounded-xl">
+                <h3 class="font-semibold text-purple-700">Machine Learning</h3>
+                <p class="text-sm text-gray-600 mt-1">LinearSVC + TF-IDF Vectorizer</p>
+            </div>
+            <div class="p-4 bg-orange-50 rounded-xl">
+                <h3 class="font-semibold text-orange-700">Prediksi</h3>
+                <p class="text-sm text-gray-600 mt-1">Uji prediksi sentimen teks baru setelah training</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const form = document.getElementById('scrapeForm');
+    const btn = document.getElementById('submitBtn');
+    const container = document.getElementById('progressContainer');
+    const bar = document.getElementById('progressBar');
+    const msg = document.getElementById('progressMessage');
+    const pct = document.getElementById('progressPercent');
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+
+    function showError(text) {
+        bar.style.background = '#ef4444';
+        bar.style.width = '100%';
+        msg.textContent = text;
+        msg.style.color = '#ef4444';
+        pct.textContent = '';
+        btn.disabled = false;
+    }
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        btn.disabled = true;
+        container.classList.remove('hidden');
+        bar.style.background = '';
+        bar.style.width = '0%';
+        msg.style.color = '';
+        msg.textContent = 'Memulai...';
+        pct.textContent = '0%';
+
+        let res;
+        try {
+            res = await fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrf },
+                body: new FormData(form),
+            });
+        } catch (err) {
+            showError('Gagal terhubung ke server.');
+            return;
+        }
+
+        if (!res.ok) {
+            try {
+                const d = await res.json();
+                showError(d.error || 'Terjadi kesalahan.');
+            } catch {
+                showError('Server error (' + res.status + '). Coba lagi nanti.');
+            }
+            return;
+        }
+
+        const data = await res.json();
+        const taskId = data.task_id;
+        const sessionId = data.session_id;
+
+        const poll = setInterval(async function() {
+            try {
+                const r = await fetch('/api/progress/' + taskId);
+                if (!r.ok) return;
+                const p = await r.json();
+                const percent = Math.round((p.progress / p.total) * 100);
+                bar.style.width = percent + '%';
+                pct.textContent = percent + '%';
+                msg.textContent = p.message;
+
+                if (p.status === 'completed') {
+                    clearInterval(poll);
+                    bar.style.width = '100%';
+                    pct.textContent = '100%';
+                    msg.textContent = 'Selesai! Mengalihkan...';
+                    setTimeout(function() {
+                        window.location.href = '/results/' + sessionId;
+                    }, 500);
+                } else if (p.status === 'failed') {
+                    clearInterval(poll);
+                    showError(p.error || 'Terjadi kesalahan saat proses.');
+                }
+            } catch (err) {
+                // Network error in polling – ignore and retry
+            }
+        }, 800);
+    });
+})();
+</script>
+{% endblock %}

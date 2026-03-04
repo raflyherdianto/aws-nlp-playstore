@@ -1,0 +1,292 @@
+{% extends 'base.html' %}
+{% block title %}Hasil Analisis – NLP Sentiment Analyzer{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+    <!-- ═══════════ Summary Cards ═══════════ -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h1 class="text-2xl font-bold text-gray-800 mb-6">Hasil Analisis</h1>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-gray-50 rounded-xl p-4 text-center">
+                <p class="text-3xl font-bold text-gray-800">{{ total }}</p>
+                <p class="text-sm text-gray-500">Total Review</p>
+            </div>
+            <div class="bg-green-50 rounded-xl p-4 text-center">
+                <p class="text-3xl font-bold text-green-600">{{ sentiment_counts.get('Positif', 0) }}</p>
+                <p class="text-sm text-gray-500">Positif</p>
+            </div>
+            <div class="bg-red-50 rounded-xl p-4 text-center">
+                <p class="text-3xl font-bold text-red-600">{{ sentiment_counts.get('Negatif', 0) }}</p>
+                <p class="text-sm text-gray-500">Negatif</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════ Pie Chart ═══════════ -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Distribusi Sentimen</h2>
+        <div class="flex justify-center">
+            <img src="{{ url_for('static', filename='charts/' + session_id + '/pie_chart.png') }}"
+                 alt="Sentiment Pie Chart" class="max-w-lg w-full rounded-lg">
+        </div>
+    </div>
+
+    <!-- ═══════════ Word Clouds ═══════════ -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Word Cloud per Sentimen</h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {% for sentiment in ['positif', 'negatif'] %}
+            <div class="text-center">
+                <h3 class="font-semibold text-gray-700 mb-2 capitalize">{{ sentiment }}</h3>
+                <img src="{{ url_for('static', filename='charts/' + session_id + '/wordcloud_' + sentiment + '.png') }}"
+                     alt="Word Cloud {{ sentiment }}" class="w-full rounded-lg border"
+                     onerror="this.parentElement.innerHTML='<p class=\'text-gray-400 text-sm py-8\'>Tidak cukup data</p>'">
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ═══════════ Top 10 Words ═══════════ -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Top 10 Kata Paling Sering</h2>
+        <div class="flex justify-center">
+            <img src="{{ url_for('static', filename='charts/' + session_id + '/top10_bar.png') }}"
+                 alt="Top 10 Frequent Words" class="max-w-2xl w-full rounded-lg">
+        </div>
+    </div>
+
+    <!-- ═══════════ Machine Learning ═══════════ -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Machine Learning</h2>
+
+        {% if not has_model %}
+        <!-- Train button -->
+        <p class="text-gray-500 mb-4">
+            Latih model <strong>LinearSVC + TF-IDF</strong> untuk klasifikasi sentimen
+            (label dari rating, fitur dari teks review).
+        </p>
+        <form action="{{ url_for('main.train', session_id=session_id) }}" method="POST" id="trainForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" id="trainBtn"
+                class="bg-purple-600 text-white py-3 px-6 rounded-xl font-semibold
+                       hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                Train Model
+            </button>
+        </form>
+        <!-- Training progress bar -->
+        <div id="trainProgress" class="hidden mt-4">
+            <div class="flex justify-between items-center mb-2">
+                <span id="trainMessage" class="text-sm font-medium" style="color:#9333ea">Memulai training...</span>
+                <span id="trainPercent" class="text-sm font-semibold" style="color:#9333ea">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full" style="height: 12px">
+                <div id="trainBar" class="rounded-full"
+                     style="height: 12px; width: 0%; background: #9333ea; transition: width 0.3s ease"></div>
+            </div>
+        </div>
+        <script>
+        (function() {
+            const form = document.getElementById('trainForm');
+            const btn = document.getElementById('trainBtn');
+            const container = document.getElementById('trainProgress');
+            const bar = document.getElementById('trainBar');
+            const msg = document.getElementById('trainMessage');
+            const pct = document.getElementById('trainPercent');
+            const csrf = document.querySelector('meta[name="csrf-token"]').content;
+            const sessionId = '{{ session_id }}';
+
+            function showError(text) {
+                bar.style.background = '#ef4444';
+                bar.style.width = '100%';
+                msg.textContent = text;
+                msg.style.color = '#ef4444';
+                pct.textContent = '';
+                btn.disabled = false;
+            }
+
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                btn.disabled = true;
+                container.classList.remove('hidden');
+                bar.style.background = '#9333ea';
+                bar.style.width = '0%';
+                msg.style.color = '#9333ea';
+                msg.textContent = 'Memulai training...';
+                pct.textContent = '0%';
+
+                let res;
+                try {
+                    res = await fetch(form.action, {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': csrf },
+                        body: new FormData(form),
+                    });
+                } catch (err) {
+                    showError('Gagal terhubung ke server.');
+                    return;
+                }
+
+                if (!res.ok) {
+                    try {
+                        const d = await res.json();
+                        showError(d.error || 'Terjadi kesalahan.');
+                    } catch {
+                        showError('Server error (' + res.status + '). Coba lagi nanti.');
+                    }
+                    return;
+                }
+
+                const data = await res.json();
+                const taskId = data.task_id;
+
+                const poll = setInterval(async function() {
+                    try {
+                        const r = await fetch('/api/progress/' + taskId);
+                        if (!r.ok) return;
+                        const p = await r.json();
+                        const percent = Math.round((p.progress / p.total) * 100);
+                        bar.style.width = percent + '%';
+                        pct.textContent = percent + '%';
+                        msg.textContent = p.message;
+
+                        if (p.status === 'completed') {
+                            clearInterval(poll);
+                            bar.style.width = '100%';
+                            pct.textContent = '100%';
+                            msg.textContent = 'Selesai! Memuat ulang...';
+                            setTimeout(function() {
+                                window.location.href = '/results/' + sessionId;
+                            }, 500);
+                        } else if (p.status === 'failed') {
+                            clearInterval(poll);
+                            showError(p.error || 'Terjadi kesalahan saat training.');
+                        }
+                    } catch (err) {
+                        // Network error – retry
+                    }
+                }, 800);
+            });
+        })();
+        </script>
+
+        {% else %}
+        <!-- Model already trained -->
+        <p class="text-green-600 font-semibold mb-6">Model sudah di-training!</p>
+
+            {% if metrics %}
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <!-- Confusion Matrix image -->
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">Confusion Matrix</h3>
+                    <img src="{{ url_for('static', filename='charts/' + session_id + '/confusion_matrix.png') }}"
+                         alt="Confusion Matrix" class="w-full rounded-lg border">
+                </div>
+                <!-- Classification Report -->
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">Classification Report</h3>
+                    <pre class="bg-gray-50 p-4 rounded-lg text-xs sm:text-sm overflow-x-auto font-mono leading-relaxed border">{{ metrics.classification_report_text }}</pre>
+                </div>
+            </div>
+            {% endif %}
+
+        <!-- ── Prediction Form ── -->
+        <div class="border-t pt-6">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">Prediksi Sentimen</h3>
+            <form action="{{ url_for('main.predict', session_id=session_id) }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input type="text" name="text" required
+                        class="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl
+                               focus:border-blue-500 focus:ring-0 focus:outline-none transition"
+                        placeholder="Masukkan teks review untuk diprediksi…"
+                        value="{{ prediction_text or '' }}">
+                    <button type="submit"
+                        class="bg-blue-600 text-white py-3 px-6 rounded-xl font-semibold
+                               hover:bg-blue-700 transition whitespace-nowrap">
+                        Prediksi
+                    </button>
+                </div>
+            </form>
+
+            {% if prediction %}
+            <div class="mt-4 p-4 rounded-xl
+                {% if prediction == 'Positif' %}bg-green-50 border-2 border-green-200
+                {% elif prediction == 'Negatif' %}bg-red-50 border-2 border-red-200
+                {% endif %}">
+                <p class="font-semibold text-lg">
+                    Hasil:
+                    <span class="
+                        {% if prediction == 'Positif' %}text-green-600
+                        {% elif prediction == 'Negatif' %}text-red-600
+                        {% endif %}">
+                        {{ prediction }}
+                    </span>
+                </p>
+                {% if probabilities %}
+                <div class="mt-2 flex flex-wrap gap-4 text-sm">
+                    {% for label, prob in probabilities.items() %}
+                    <span class="
+                        {% if label == 'Positif' %}text-green-600
+                        {% elif label == 'Negatif' %}text-red-600
+                        {% endif %}">
+                        {{ label }}: {{ prob }}
+                    </span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ═══════════ Sample Data ═══════════ -->
+    <div class="bg-white rounded-2xl shadow-lg p-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Sampel Data (10 baris pertama)</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b-2 border-gray-200 text-gray-600">
+                        <th class="text-left py-3 px-2">User</th>
+                        <th class="text-left py-3 px-2">Review</th>
+                        <th class="text-center py-3 px-2">Score</th>
+                        <th class="text-center py-3 px-2">Sentimen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in sample_data %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="py-2 px-2 text-gray-600 whitespace-nowrap">
+                            {{ row.userName[:20] if row.userName else '–' }}
+                        </td>
+                        <td class="py-2 px-2 max-w-xs truncate" title="{{ row.content }}">
+                            {{ row.content[:120] }}{% if row.content|length > 120 %}&hellip;{% endif %}
+                        </td>
+                        <td class="py-2 px-2 text-center font-medium">{{ row.score }}</td>
+                        <td class="py-2 px-2 text-center">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold
+                                {% if row.sentiment == 'Positif' %}bg-green-100 text-green-700
+                                {% elif row.sentiment == 'Negatif' %}bg-red-100 text-red-700
+                                {% endif %}">
+                                {{ row.sentiment }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Back button -->
+    <div class="text-center pb-4">
+        <a href="{{ url_for('main.index') }}"
+           class="inline-block bg-gray-200 text-gray-700 py-3 px-8 rounded-xl
+                  font-semibold hover:bg-gray-300 transition">
+            &larr; Analisis Baru
+        </a>
+    </div>
+
+</div>
+{% endblock %}

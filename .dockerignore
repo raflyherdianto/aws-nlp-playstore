@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.env
+.git
+.gitignore
+uploads/
+app/static/charts/
+*.md
+.venv
+venv
+.github
+node_modules
+tests/
