@@ -1,5 +1,9 @@
+import nltk
 import pytest
 from app import create_app
+
+# Ensure NLTK tokenizer data is available for tests
+nltk.download('punkt_tab', quiet=True)
 
 
 @pytest.fixture

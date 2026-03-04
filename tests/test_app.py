@@ -17,9 +17,11 @@ def test_health_endpoint(client):
 
 
 def test_scrape_requires_app_id(client):
-    """POST /scrape without app_id should redirect back with error flash."""
+    """POST /scrape without app_id should return 400 JSON error."""
     response = client.post('/scrape', data={'app_id': '', 'max_reviews': '100'})
-    assert response.status_code == 302  # redirect
+    assert response.status_code == 400
+    data = response.get_json()
+    assert 'error' in data
 
 
 def test_results_invalid_session(client):
