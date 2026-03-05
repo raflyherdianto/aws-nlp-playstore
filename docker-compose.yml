@@ -3,10 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: ghcr.io/raflyherdianto/aws-nlp-playstore:latest
     container_name: nlp_playstore
     restart: always
     ports:
       - "5000:5000"
+    networks:
+      - shared-network
     volumes:
       - ./uploads:/app/uploads # Persistensi sementara untuk CSV & Model
     environment:
@@ -23,16 +26,16 @@ services:
     deploy:
       resources:
         limits:
-          memory: 800M    # Sisakan ~200MB untuk OS dan Cloudflare Tunnel
-          cpus: '0.8'      # Sisakan 20% CPU agar OS tetap responsif
+          memory: 1536M   # t4g.medium has 4 GB — leave room for CF tunnel + OS
+          cpus: '1.5'      # t4g.medium has 2 vCPU — reserve 0.5 for OS
         reservations:
-          memory: 256M
+          memory: 512M
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # Mencegah log memenuhi disk 30GB AWS
+        max-size: "10m"   # Mencegah log memenuhi disk
         max-file: "3"
 
-  # Cloudflare Tunnel sebagai sidecar atau bisa diinstall terpisah di host
-  # Saya sarankan install di host agar lebih stabil, 
-  # tapi jika ingin di docker, gunakan image: cloudflare/cloudflared
+networks:
+  shared-network:
+    external: true

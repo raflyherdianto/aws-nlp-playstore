@@ -3,11 +3,12 @@
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.0-green?logo=flask&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-1.5-orange?logo=scikit-learn&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Multi--Arch-2496ED?logo=docker&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-EC2_Spot-FF9900?logo=amazonec2&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.0-38B2AC?logo=tailwindcss&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-An end-to-end **Indonesian NLP Sentiment Analysis** web application that scrapes Google Play Store reviews, classifies sentiment using a LinearSVC model, and provides interactive visualizations — all deployable on **AWS Free Tier**.
+An end-to-end **Indonesian NLP Sentiment Analysis** web application that scrapes Google Play Store reviews, classifies sentiment using a LinearSVC model, and provides interactive visualizations — deployed on **AWS EC2 Spot Instance** with automated CI/CD.
 
 > **Live Demo:** [https://nlp1.bangraply.cloud](https://nlp1.bangraply.cloud)
 
@@ -33,8 +34,10 @@ This application performs binary sentiment classification (Positif / Negatif) on
 - **Interactive Visualizations** — Pie chart, per-sentiment word clouds, and top-10 frequent words bar chart
 - **Single-text Prediction** — Test the trained model on any custom text input
 - **Background Processing** — Async scraping & training via threading with live progress bars
-- **Auto-cleanup** — APScheduler deletes temporary files after 60 minutes
+- **Auto-cleanup** — APScheduler deletes temporary files after 15 minutes
 - **Production Ready** — Gunicorn WSGI, CSRF protection, rate limiting, Docker multi-stage build
+- **Multi-arch Docker** — GHCR-hosted images for both `amd64` and `arm64` (AWS Graviton)
+- **Spot Instance Resilient** — Auto-restart via systemd on instance recovery
 
 ---
 
@@ -112,7 +115,8 @@ nlp-aws/
 ├── tests/                       # Pytest test suite
 ├── .github/workflows/           # CI/CD pipeline
 ├── Dockerfile                   # Multi-stage: Node (Tailwind) → Python
-├── docker-compose.yml           # Production config with resource limits
+├── docker-compose.yml           # Dev/local config (builds image locally)
+├── docker-compose.prod.yml      # EC2 production reference (pulls from GHCR)
 ├── requirements.txt             # Python dependencies
 ├── tailwind.config.js           # Tailwind CSS configuration
 ├── main.py                      # Application entrypoint
@@ -131,8 +135,8 @@ nlp-aws/
 | **Data** | Pandas, google-play-scraper |
 | **Visualization** | Matplotlib, WordCloud |
 | **Security** | Flask-WTF (CSRF), Flask-Limiter (rate limiting) |
-| **Infrastructure** | Docker, Docker Compose, AWS EC2, Cloudflare Tunnel |
-| **CI/CD** | GitHub Actions |
+| **Infrastructure** | Docker, Docker Compose, GHCR, AWS EC2 (Spot), Cloudflare Tunnel |
+| **CI/CD** | GitHub Actions (test → build multi-arch → deploy) |
 
 ---
 
@@ -198,17 +202,21 @@ docker compose down
 
 ---
 
-## Resource Limits (AWS Free Tier)
+## Resource Configuration (AWS EC2 t4g.medium Spot Instance)
 
-The application is optimized for `t3.micro` (1 vCPU, 1 GB RAM):
+The application runs on `t4g.medium` (2 vCPU ARM Graviton, 4 GB RAM) as a **Persistent Spot Instance**:
 
-| Resource | Limit |
+| Resource | Value |
 |:--|:--|
-| Memory | 800 MB (container limit) |
-| CPU | 0.8 cores |
-| Workers | 1 (gthread with 2 threads) |
+| Instance type | `t4g.medium` (ARM64 Graviton) |
+| Request type | Spot — Persistent |
+| Memory limit | 1,536 MB (container) |
+| CPU limit | 1.5 cores |
+| Workers | 2 (gthread with 2 threads each) |
 | Timeout | 300 seconds |
 | Log rotation | 10 MB × 3 files |
+| Docker image | Multi-arch (amd64 + arm64) via GHCR |
+| Auto-restart | systemd service on boot (Spot recovery) |
 
 ---
 

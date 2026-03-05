@@ -12,12 +12,12 @@ scheduler = BackgroundScheduler(daemon=True)
 
 
 def cleanup_old_files(app):
-    """Delete CSV, .joblib, and .json metric files older than 60 minutes."""
+    """Delete CSV, .joblib, and .json metric files older than 15 minutes."""
     with app.app_context():
         upload_folder = app.config['UPLOAD_FOLDER']
         charts_folder = os.path.join(app.static_folder, 'charts')
         now = time.time()
-        max_age = 60 * 60  # 60 minutes in seconds
+        max_age = 15 * 60  # 15 minutes in seconds
 
         # Clean upload files (CSV, model, metrics)
         if os.path.exists(upload_folder):
@@ -61,4 +61,4 @@ def init_scheduler(app):
         replace_existing=True,
     )
     scheduler.start()
-    print("[Scheduler] File cleanup scheduler started (60-min expiry, checked every 5 min)")
+    print("[Scheduler] File cleanup scheduler started (15-min expiry, checked every 5 min)")

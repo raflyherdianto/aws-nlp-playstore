@@ -1,4 +1,4 @@
-name: CI/CD — Test & Deploy to AWS EC2
+name: CI/CD — Test, Build & Deploy
 
 on:
   push:
@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch: # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # ── 1. Lint & Test ──────────────────────────────────────────────────────
@@ -32,13 +36,60 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
-  # ── 2. Deploy to EC2 (only on push to main) ────────────────────────────
-  deploy:
-    name: Deploy to EC2
+  # ── 2. Build & Push Multi-Arch Docker Image to GHCR ────────────────────
+  build:
+    name: Build & Push to GHCR
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    timeout-minutes: 15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build & push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 3. Deploy to EC2 (pull from GHCR & restart) ────────────────────────
+  deploy:
+    name: Deploy to EC2
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 10
 
     steps:
       - name: Deploy via SSH
@@ -53,40 +104,102 @@ jobs:
           script: |
             set -e
 
-            PROJECT_DIR="$HOME/aws-nlp-playstore"
-
-            # Clone if first deploy, otherwise pull
-            if [ ! -d "$PROJECT_DIR" ]; then
-              echo "📦 First deploy — cloning repository..."
-              git clone https://github.com/raflyherdianto/aws-nlp-playstore.git "$PROJECT_DIR"
-            else
-              echo "🔄 Pulling latest changes..."
-              cd "$PROJECT_DIR"
-              git fetch origin main
-              git reset --hard origin/main
-            fi
-
+            PROJECT_DIR="$HOME/nlp_playstore"
+            mkdir -p "$PROJECT_DIR/uploads"
             cd "$PROJECT_DIR"
+
+            # Ensure shared-network exists
+            docker network inspect shared-network >/dev/null 2>&1 || \
+              docker network create shared-network
+
+            # Write docker-compose.yml (always overwrite to keep in sync)
+            cat > docker-compose.yml << 'COMPOSE'
+            services:
+              app:
+                image: ghcr.io/raflyherdianto/aws-nlp-playstore:latest
+                container_name: nlp_playstore
+                restart: always
+                ports:
+                  - "5000:5000"
+                networks:
+                  - shared-network
+                volumes:
+                  - ./uploads:/app/uploads
+                environment:
+                  - FLASK_ENV=production
+                  - PYTHONUNBUFFERED=1
+                  - NLTK_DATA=/root/nltk_data
+                  - SECRET_KEY=${SECRET_KEY:-}
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+                  interval: 30s
+                  timeout: 5s
+                  retries: 3
+                  start_period: 15s
+                deploy:
+                  resources:
+                    limits:
+                      memory: 1536M
+                      cpus: '1.5'
+                    reservations:
+                      memory: 512M
+                logging:
+                  driver: "json-file"
+                  options:
+                    max-size: "10m"
+                    max-file: "3"
+
+            networks:
+              shared-network:
+                external: true
+            COMPOSE
 
             # Create .env if it doesn't exist
             if [ ! -f .env ]; then
-              echo "⚙️ Creating .env file..."
-              cat > .env <<EOF
+              cat > .env << EOF
             FLASK_ENV=production
             PYTHONUNBUFFERED=1
             SECRET_KEY=${{ secrets.SECRET_KEY }}
             EOF
             else
-              # Update SECRET_KEY from GitHub Secrets
               sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${{ secrets.SECRET_KEY }}|" .env
             fi
 
-            # Build and deploy
-            echo "🐳 Building Docker image..."
-            docker-compose build --no-cache
+            # Login to GHCR
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u raflyherdianto --password-stdin
 
+            # Ensure auto-start on boot (critical for Spot Instance recovery)
+            if [ ! -f /etc/systemd/system/nlp-playstore.service ]; then
+              echo "🔧 Installing systemd service for auto-start on boot..."
+              sudo tee /etc/systemd/system/nlp-playstore.service > /dev/null << 'SERVICE'
+            [Unit]
+            Description=NLP Playstore Docker Compose
+            Requires=docker.service
+            After=docker.service
+
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            WorkingDirectory=/home/ubuntu/nlp_playstore
+            ExecStart=/usr/bin/docker compose up -d
+            ExecStop=/usr/bin/docker compose down
+            User=ubuntu
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+              sudo systemctl daemon-reload
+              sudo systemctl enable nlp-playstore.service
+              echo "✅ Auto-start service installed"
+            fi
+
+            # Pull latest multi-arch image
+            echo "📦 Pulling latest image from GHCR..."
+            docker compose pull
+
+            # Recreate container with new image
             echo "🚀 Starting container..."
-            docker-compose up -d
+            docker compose up -d --force-recreate
 
             # Wait for container to be healthy
             echo "⏳ Waiting for health check..."

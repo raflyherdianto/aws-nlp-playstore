@@ -57,7 +57,7 @@ def create_app():
     def rate_limit_exceeded(e):
         return render_template('429.html'), 429
 
-    # Initialize APScheduler for 60-minute file cleanup
+    # Initialize APScheduler for 15-minute file cleanup
     from app.utils.scheduler import init_scheduler
     init_scheduler(app)
 

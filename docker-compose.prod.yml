@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════════
+# Production Docker Compose — AWS EC2 (t4g.medium Spot Instance)
+# ═══════════════════════════════════════════════════════════════════════
+# This file is deployed to EC2 at ~/nlp_playstore/docker-compose.yml
+# It pulls pre-built images from GHCR (no local build).
+#
+# Usage on EC2:
+#   docker compose pull
+#   docker compose up -d
+# ═══════════════════════════════════════════════════════════════════════
+
+services:
+  app:
+    image: ghcr.io/raflyherdianto/aws-nlp-playstore:latest
+    container_name: nlp_playstore
+    restart: always
+    ports:
+      - "5000:5000"
+    networks:
+      - shared-network
+    volumes:
+      - ./uploads:/app/uploads
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+      - NLTK_DATA=/root/nltk_data
+      - SECRET_KEY=${SECRET_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: '1.5'
+        reservations:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  shared-network:
+    external: true

@@ -44,6 +44,6 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-# Production WSGI server – optimized for AWS Free Tier (t3.micro / 1 GB RAM)
-# 1 worker + 2 threads keeps memory under 512 MB; timeout 300s for scraping
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "2", "--worker-class", "gthread", "--timeout", "300", "--max-requests", "100", "--max-requests-jitter", "20", "--access-logfile", "-", "main:app"]
+# Production WSGI server – optimized for AWS EC2 t4g.medium Spot Instance (2 vCPU, 4 GB RAM)
+# 2 workers + 2 threads for better concurrency; timeout 300s for scraping
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "2", "--worker-class", "gthread", "--timeout", "300", "--max-requests", "500", "--max-requests-jitter", "50", "--access-logfile", "-", "main:app"]
